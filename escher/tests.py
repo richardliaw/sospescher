@@ -30,9 +30,10 @@ def test_pytorch_custom():
     config["trial_id"] = "hi"
     config["min_batch_size"] = 4
     config["target_batch_size"] = 4
-    config["model_string"] = "resnet18"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"
-    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=6))
+    config["model_string"] = "resnet101"
+    config["placement"] = [3, 2]
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=5))
     for i in range(10):
         print(custom.train())
     
