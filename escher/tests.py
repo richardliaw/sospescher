@@ -1,4 +1,6 @@
 from escher.distributed_trainable import ResourceExecutor, Aggregator
+from escher.pytorch_trainable import PytorchSGD, DEFAULT_CONFIG
+
 from escher.placement import PlacementScheduler
 
 import ray
@@ -33,7 +35,7 @@ def test_basic():
     import ipdb; ipdb.set_trace()
 
 
-def test_tune():
+def test_tune_local():
     # Initialize cluster
     print("Initializing cluster..")
     cluster = Cluster()
@@ -51,11 +53,27 @@ def test_tune():
     }
     scheduler = PlacementScheduler(4)
     tune.run(Aggregator,
-        name="my_exp",
+        name="my_exp_2",
         scheduler=scheduler,
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_cpu=i)
             for i in [1, 1, 1, 1, 4]]),
+        trial_executor=ResourceExecutor(),
+        **config)
+
+def test_tune():
+    ray.init(redis_address="localhost:6379")
+    config = DEFAULT_CONFIG.copy()
+    config["config"] = {"stop": 20}
+
+    scheduler = PlacementScheduler(8)
+    tune.run(PytorchSGD,
+        name="my_exp_2",
+        local_dir="~/sgd_results/",
+        scheduler=scheduler,
+        resources_per_trial=tune.grid_search([
+            dict(cpu=0, gpu=0, extra_gpu=i)
+            for i in [2,2,2,2, 8]]),
         trial_executor=ResourceExecutor(),
         **config)
 

@@ -7,6 +7,7 @@ import os
 import time
 import numpy as np
 import random
+from collections import Counter
 
 import ray
 from ray.tune.logger import NoopLogger
@@ -57,11 +58,19 @@ class ResourceTrainable(Trainable):
         if ray.worker._mode() == ray.worker.LOCAL_MODE:
             os.chdir(cwd)
 
+def generate():
+    return np.random.rand(300, 300, 300)
+
 
 @ray.remote
 class TestActor():
     def __init__(self):
         pass
+
+    def compute_grad(self, grad):
+        import numpy as np
+        grad += generate()
+        return grad
 
     def get_client(self):
         client_table = ray.global_state.client_table()
@@ -83,18 +92,30 @@ class Aggregator(ResourceTrainable):
         for i in range(num_workers):
             self.actors += [TestActor._remote(args=[], num_cpus=1, resources=resources)]
 
+        self.start_grad = ray.put(generate())
+        self.data_transferred = 300 * 300 * 300 * 8
+        self.locations = dict(Counter(ray.get([a.get_client.remote() for a in self.actors])))
+
     def _train(self):
         import time
-        time.sleep(self.config.get("delay", 0.1))
-        from collections import Counter
-        locations = Counter(ray.get([a.get_client.remote() for a in self.actors]))
-        if len(locations) == 1:
-            throughput = len(self.actors)
-        else:
-            throughput = 0.5
+        start = time.time()
+
+        grad = self.start_grad
+        num_iters = 30
+        for i in range(num_iters):
+            for actor in self.actors:
+                grad = actor.compute_grad.remote(grad)
+
+            ray.get(grad)
+        duration = time.time() - start
+
         random_stop = self.resources.extra_cpu * 10 + np.random.choice(np.r_[:20])
+        throughput = num_iters * self.data_transferred * (len(self.actors)) / (
+            duration * 2**30)
+
         return {
-            "locations": dict(locations),
+            "locations": self.locations,
+            "duration": duration,
             "throughput": throughput,
             "done": self._iteration > random_stop
         }
