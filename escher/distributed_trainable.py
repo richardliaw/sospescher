@@ -99,8 +99,12 @@ class Aggregator(ResourceTrainable):
             "done": self._iteration > random_stop
         }
 
-    def _save(self):
+    def _save(self, ckpt):
         return {}
 
     def _restore(self, ckpt):
         pass
+
+    def _stop(self):
+        for actor in self.actors:
+            actor.__ray_terminate__.remote()

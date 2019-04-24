@@ -65,11 +65,16 @@ class PlacementScheduler(FIFOScheduler):
         self.executor.save(trial, storage="memory")
         self.executor.stop_trial(trial, stop_logger=False)
         trial.status = Trial.PENDING
-
+        logger.warning("Trial stopped.")
         for other_location in self.all_placements:
             ray.experimental.delete_resource(trial.trial_id, other_location)
+        logger.warning("Resources cleared.")
         # delete resources in all_location
         ray.experimental.create_resource(trial.trial_id, total_job_size, location)
+        logger.warning("Resources created.")
         trial.resources.extra_custom_resources[trial.trial_id] = total_job_size
+        trial.resources.custom_resources[trial.trial_id] = 0
+        print(ray.global_state.client_table())
+        print(ray.global_state.available_resources())
         print("New resources: {}".format(trial.resources.summary_string()))
         self.executor.start_trial(trial)
