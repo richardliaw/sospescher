@@ -1,0 +1,82 @@
+from collections import defaultdict
+
+import ray
+from ray.tune.trial import Trial
+from ray.tune.schedulers import TrialScheduler
+from ray.tune.schedulers import FIFOScheduler
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+class PlacementScheduler(FIFOScheduler):
+    def __init__(self, consolidation_limit=4):
+        self.limit = consolidation_limit
+        self.all_placements = defaultdict(dict)
+        self.all_live_trials = set()
+
+    def on_trial_result(self, trial_runner, trial, result):
+        self.all_live_trials.add(trial.trial_id)
+        locations = result["locations"]  # This is a map from location -> count
+        in_sync = self._track_trial(trial_runner, trial.trial_id, locations)
+        if not in_sync:
+            return TrialScheduler.CONTINUE
+        else:
+            logger.info(f"{trial} is in sync!")
+
+        total_job_size = sum(locations.values())
+        if total_job_size == 1:
+            return TrialScheduler.CONTINUE
+        for location, size in locations.items():
+            rest_of_job = total_job_size - size
+            print(f"All placements {self.all_placements}")
+            print(f"{sum(self.all_placements[location].values()) + rest_of_job} <= {self.limit} (limit)")
+            if sum(self.all_placements[location].values()) + rest_of_job <= self.limit:
+
+                self._migrate_trial(trial, location)
+                break
+        return TrialScheduler.CONTINUE
+
+    def on_trial_complete(self, trial_runner, trial, result):
+        import ipdb; ipdb.set_trace()
+        self._track_trial(trial_runner, trial.trial_id, {t: 0 for t in result["locations"]})
+        self.on_trial_remove(trial_runner, trial)
+
+    def on_trial_remove(self, trial_runner, trial):
+        self.all_live_trials.remove(trial.trial_id)
+
+    def _track_trial(self, trial_runner, trial_id, locations):
+        in_sync = True
+
+        live_ids = [t.trial_id for t in trial_runner.get_trials() if t.status == Trial.RUNNING]
+        if not len(live_ids) == len(self.all_live_trials):
+            in_sync = False
+
+        for path, count in list(locations.items()):
+            location_trials = self.all_placements[path]
+            if trial_id not in location_trials or location_trials[trial_id] != count:
+                in_sync = False
+                logger.warning(f"{trial_id} out of sync.")
+                self.all_placements[path][trial_id] = count
+        return in_sync
+
+    def _migrate_trial(self, trial, location):
+        raise NotImplementedError
+        # stop_trial
+        # delete resources in all_location
+        ray.experimental.create_resource(trial.trial_id, self.limit, location)
+        self._commit_resource_update(trial, self.limit)
+        self.executor.start_trial(trial)
+
+    def _commit_resource_update(self, trial, executor, updated_resources):
+        executor.save(trial, storage="memory")
+        executor.stop_trial(trial, stop_logger=False)
+        trial.status = Trial.PENDING
+        trial.resources = updated_resources
+        executor.start_trial(trial)
+        self.reallocation_timer[trial] = self.recharge_period
+        logger.info("Committed res {}".format(executor._committed_resources.summary_string()))
+        logger.info("Avail {}".format(executor._avail_resources.summary_string()))
+
+
+
