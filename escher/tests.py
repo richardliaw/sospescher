@@ -6,6 +6,7 @@ from escher.placement import PlacementScheduler
 import ray
 import time
 from ray import tune
+from datetime import datetime
 from ray.tests.cluster_utils import Cluster
 from ray.tune.trial import Resources
 
@@ -61,19 +62,31 @@ def test_tune_local():
         trial_executor=ResourceExecutor(),
         **config)
 
+def timestring():
+    return datetime.today().strftime("%Y-%m-%d_%H-%M-%S")
+
 def test_tune():
     ray.init(redis_address="localhost:6379")
-    config = DEFAULT_CONFIG.copy()
-    config["config"] = {"stop": 20}
-
+    d_config = DEFAULT_CONFIG.copy()
+    d_config.update({"target_batch_size": 128, "stop": 2, "steps_per_iteration": 5})
+    config = {"config": d_config} 
     scheduler = PlacementScheduler(8)
     tune.run(PytorchSGD,
-        name="my_exp_2",
-        local_dir="~/sgd_results/",
+        name="my_exp_{}".format(timestring()),
+        local_dir="~/results/",
         scheduler=scheduler,
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [2,2,2,2, 8]]),
+            for i in [1,1,1,1, 8]]),
+        trial_executor=ResourceExecutor(),
+        **config)
+
+    tune.run(PytorchSGD,
+        name="no_sched_{}".format(timestring()),
+        local_dir="~/results/",
+        resources_per_trial=tune.grid_search([
+            dict(cpu=0, gpu=0, extra_gpu=i)
+            for i in [1,1,1,1, 8]]),
         trial_executor=ResourceExecutor(),
         **config)
 

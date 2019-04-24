@@ -30,14 +30,20 @@ class PlacementScheduler(FIFOScheduler):
         total_job_size = sum(locations.values())
         if total_job_size == 1 or total_job_size > self.limit:
             return TrialScheduler.CONTINUE
+        if any(size == total_job_size for size in locations.values()):
+            return TrialScheduler.CONTINUE
         for location, size in locations.items():
             rest_of_job = total_job_size - size
-            if rest_of_job == 0 or size == 0:
-                break
+            if size == 0:
+                continue
+            if rest_of_job == 0:
+                 break
             print(f"All placements {self.all_placements}")
             print(f"{sum(self.all_placements[location].values()) + rest_of_job} <= {total_job_size} (limit)")
             if sum(self.all_placements[location].values()) + rest_of_job <= self.limit:
+                import ipdb; ipdb.set_trace()
                 self._migrate_trial(trial, total_job_size, location)
+                
                 break
         return TrialScheduler.CONTINUE
 

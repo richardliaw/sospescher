@@ -346,7 +346,7 @@ class PytorchSGD(ResourceTrainable):
             if not actors_in_node:
                 continue
             if actors_in_node == 1:
-                self.remote_workers += [self._create_single_worker(config)]
+                self.remote_workers += [self._create_single_worker(config, resources)]
             else:
                 raise NotImplementedError
                 # self.remote_workers += self._create_group_workers(actors_in_node, config)
@@ -356,8 +356,9 @@ class PytorchSGD(ResourceTrainable):
         self.locations = dict(Counter(ray.get(
             [a.get_client.remote() for a in self.remote_workers])))
 
-    def _create_single_worker(self, config):
-        RemotePyTorchRunner = ray.remote(num_gpus=1)(PyTorchRunner)
+    def _create_single_worker(self, config, resources):
+        print(f"!!!! resources is {resources}")
+        RemotePyTorchRunner = ray.remote(num_gpus=1, resources=resources)(PyTorchRunner)
         worker = RemotePyTorchRunner.remote(
             config["batch_per_device"],
             starting_lr=config["starting_lr"],
@@ -403,7 +404,7 @@ class PytorchSGD(ResourceTrainable):
             self._setup_impl(config)
 
     def train(self):
-        random_stop = self.resources.extra_gpu * 10 + np.random.choice(np.r_[:10])
+        random_stop = self.resources.extra_gpu * 5 + 5
         with self.session_timer["train"]:
             result = super(PytorchSGD, self).train()
         result.update(ready_to_resize=self.ready_to_resize())
@@ -415,6 +416,7 @@ class PytorchSGD(ResourceTrainable):
         self.resource_time += result["training_time"] * result["num_workers"]
         result["resource_time"] = self.resource_time
         result["locations"] = self.locations
+        print(f"{self._iteration} > {random_stop}")
         result["done"] = self._iteration > random_stop
         return result
 
