@@ -15,7 +15,7 @@ import random
 import pandas as pd
 import numpy as np
 import ray
-from .util import TimerStat
+from .util import TimerStat, create_colocated
 
 import ray
 from escher.distributed_trainable import ResourceTrainable
@@ -300,6 +300,39 @@ class PyTorchRunner(object):
         return [k["ClientID"] for k in client_table if k["ObjectStoreSocketName"] == socket_name][0]
 
 
+class NodeColocatorActor():
+    """Object that is called when launching the different nodes
+
+    Should take in N number of gpus in the node (and the location of the cluster?)
+    and create N actors with num_gpu=0 and place them on the cluster.
+    """
+
+    def __init__(self, batch_size, num_gpus, config):
+        RemotePyTorchRunner = ray.remote(PyTorchRunner)
+        logger.info(f"Colocator launched on: {os.uname()[1]}")
+        args = [
+            config["batch_per_device"],
+            config["starting_lr"],
+            config["momentum"],
+            config["weight_decay"],
+            config["steps_per_iteration"],
+            config["model_string"],
+            config["verbose"],
+            config["use_nccl"]
+        ]
+        self.remote_workers = create_colocated(
+            RemotePyTorchRunner, args, count=num_gpus)
+        gpu_ids = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
+        logger.info(f"Colocator sharing {gpu_ids}")
+
+        assert len(gpu_ids) == len(self.remote_workers)
+        for dev_id, worker in zip(gpu_ids, self.remote_workers):
+            worker.set_device.remote(dev_id)
+
+    def get_workers(self):
+        return self.remote_workers
+
+
 class PytorchCustom(ResourceTrainable):
     ADDRESS_TMPL = "tcp://{ip}:{port}"
 
@@ -324,8 +357,9 @@ class PytorchCustom(ResourceTrainable):
 
         self.config = config or DEFAULT_CONFIG
 
-        self._placement_set = (self.config["placement"] or
-            [1 for i in range(self.primary_resource)])
+        self._placement_set = [1 for i in range(self.primary_resource)]
+        if not resources and self.config["placement"]:
+            self._placement_set = self.config["placement"]
 
         config["batch_per_device"] = max(
             int(config["target_batch_size"] / self.primary_resource),
@@ -341,8 +375,7 @@ class PytorchCustom(ResourceTrainable):
             if actors_in_node == 1:
                 self.remote_workers += [self._create_single_worker(config, resources)]
             else:
-                raise NotImplementedError
-                # self.remote_workers += self._create_group_workers(actors_in_node, config)
+                self.remote_workers += self._create_group_workers(actors_in_node, config)
 
         self._sync_all_workers()
 
@@ -363,6 +396,14 @@ class PytorchCustom(ResourceTrainable):
         worker.set_device.remote()
         return worker
 
+    def _create_group_workers(self, actors_in_node, config):
+        RemoteColocator = ray.remote(num_gpus=int(actors_in_node))(NodeColocatorActor)
+        colocator = RemoteColocator.remote(
+            self.config["target_batch_size"], int(actors_in_node), self.config)
+        self.colocators += [colocator]
+
+        return ray.get(colocator.get_workers.remote())
+
     def _sync_all_workers(self):
         setup_futures = []
         master_ip = None
@@ -379,7 +420,7 @@ class PytorchCustom(ResourceTrainable):
 
         ray.get(setup_futures)
         [worker.setup_model.remote() for worker in self.remote_workers]
-        
+
         logger.error("TODO FOR REAL WORKLOAD: Get number directory, sync all models")
 
     def _setup(self, config):
