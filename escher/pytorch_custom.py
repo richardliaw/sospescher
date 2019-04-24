@@ -88,6 +88,7 @@ class PyTorchRunner(object):
 
     def setup_proc_group(self, dist_url, world_rank=0, world_size=1):
         # self.try_stop()
+        self.world_rank = world_rank
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
         with self._timers["setup_proc"]:
 
@@ -506,7 +507,6 @@ class PytorchCustom(ResourceTrainable):
             stops += [colocator.__ray_terminate__.remote()]
 
         for worker in self.remote_workers:
-            stops += [worker.try_stop.remote()]
             stops += [worker.__ray_terminate__.remote()]
 
     def ready_to_resize(self):

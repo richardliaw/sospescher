@@ -14,6 +14,7 @@ from ray.tune.trial import Resources
 import argparse
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter, description="Shard.")
+parser.add_argument("--place", action='store_true', help="Prefetch data onto all nodes")
 
 parser.add_argument(
     "--redis-address",
@@ -93,7 +94,7 @@ def test_tune_local():
 def timestring():
     return datetime.today().strftime("%Y-%m-%d_%H-%M-%S")
 
-def test_tune():
+def test_tune(use_placement=False):
     ray.init(redis_address="localhost:6379")
     from escher.pytorch_custom import PytorchCustom, DEFAULT_CONFIG
 
@@ -104,26 +105,23 @@ def test_tune():
     d_config["placement"] = [2,2]
     config = {"config": d_config, "stop": {"time_total_s": 240}}
 
-    scheduler = PlacementScheduler(4)
+
+    name="no_sched_{}".format(timestring())
+    scheduler = None
+    if use_placement:
+        scheduler = PlacementScheduler(4)
+        name = "my_exp_{}".format(timestring())
+
     tune.run(PytorchCustom,
-        name="my_exp_{}".format(timestring()),
+        name=name,
         local_dir="~/results/",
         scheduler=scheduler,
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1, 4, 1, 4]]),
-        trial_executor=ResourceExecutor(),
-        **config)
-
-    tune.run(PytorchCustom,
-        name="no_sched_{}".format(timestring()),
-        local_dir="~/results/",
-        resources_per_trial=tune.grid_search([
-            dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1, 4, 1, 4]]),
+            for i in [1,1, 1, 4, 1, 1]]),
         trial_executor=ResourceExecutor(),
         **config)
 
 
 if __name__ == '__main__':
-    test_tune()
+    test_tune(args.place)
