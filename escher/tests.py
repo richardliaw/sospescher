@@ -1,4 +1,5 @@
 from escher.distributed_trainable import ResourceExecutor, Aggregator
+import os
 from escher.pytorch_trainable import PytorchSGD, DEFAULT_CONFIG
 
 from escher.placement import PlacementScheduler
@@ -9,6 +10,17 @@ from ray import tune
 from datetime import datetime
 from ray.tests.cluster_utils import Cluster
 from ray.tune.trial import Resources
+
+def test_pytorch_custom():
+    ray.init(redis_address="localhost:6379")
+    from escher.pytorch_custom import PytorchCustom, DEFAULT_CONFIG
+    config = DEFAULT_CONFIG.copy()
+    config["trial_id"] = "hi"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "4,7"
+    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=2))
+    for i in range(20):
+        print(custom.train())
+    
 
 def test_basic():
     from collections import Counter
@@ -68,17 +80,8 @@ def timestring():
 def test_tune():
     ray.init(redis_address="localhost:6379")
     d_config = DEFAULT_CONFIG.copy()
-    d_config.update({"target_batch_size": 32, "min_batch_size": 32, "stop": 2, "steps_per_iteration": 1})
+    d_config.update({"target_batch_size": 8, "min_batch_size": 8, "stop": 2, "steps_per_iteration": 1})
     config = {"config": d_config, "stop": {"time_total_s": 90}} 
-
-    tune.run(PytorchSGD,
-        name="no_sched_{}".format(timestring()),
-        local_dir="~/results/",
-        resources_per_trial=tune.grid_search([
-            dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1,1, 6]]),
-        trial_executor=ResourceExecutor(),
-        **config)
 
     scheduler = PlacementScheduler(8)
     tune.run(PytorchSGD,
@@ -91,6 +94,15 @@ def test_tune():
         trial_executor=ResourceExecutor(),
         **config)
 
+    tune.run(PytorchSGD,
+        name="no_sched_{}".format(timestring()),
+        local_dir="~/results/",
+        resources_per_trial=tune.grid_search([
+            dict(cpu=0, gpu=0, extra_gpu=i)
+            for i in [1,1,1,1, 6]]),
+        trial_executor=ResourceExecutor(),
+        **config)
+
 
 if __name__ == '__main__':
-    test_tune()
+    test_pytorch_custom()

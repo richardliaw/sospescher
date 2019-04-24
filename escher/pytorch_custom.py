@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 class PyTorchRunner(object):
     def __init__(self, batch_size, starting_lr=0.1, momentum=0.9,
                  weight_decay=5e-4, steps_per_iteration=None,
-                 model_string="resnet50", verbose=False, use_nccl=False):
+                 model_string="resnet18", verbose=False, use_nccl=False):
         import torch.backends.cudnn as cudnn
         cudnn.benchmark = True
         self.batch_size = batch_size
@@ -142,7 +142,6 @@ class PyTorchRunner(object):
                 batch_size=self.batch_size,
                 num_workers=2,
                 pin_memory=False,
-                sampler=self.val_sampler
             )
             self._train_iterator = iter(self.train_loader)
 
@@ -186,7 +185,7 @@ class PyTorchRunner(object):
 
     def compute_grads(self):
         try:
-            features, target = next(self.train_iterator)
+            features, target = next(self._train_iterator)
         except StopIteration:
             self.train_iterator = iter(self.train_loader)
             features, target = next(self.train_iterator)
@@ -206,7 +205,7 @@ class PyTorchRunner(object):
         with timers["grad"]:
             # compute gradients in a backward pass
             self.optimizer.zero_grad()
-            self.loss.backward()
+            loss.backward()
 
         grads = []
         for p in self.model.parameters():
@@ -218,14 +217,14 @@ class PyTorchRunner(object):
 
     def merge(self, list_of_grads):
         merged_grads = []
-        for i, _ in enumerate(list_of_grads[0])
+        for i, _ in enumerate(list_of_grads[0]):
             all_models_layer = np.mean(
                 [grads[i] for grads in list_of_grads], axis=0)
             merged_grads += [all_models_layer]
         return merged_grads
 
     def apply_grad(self, gradients):
-        for g, p in zip(gradients, self._model.parameters()):
+        for g, p in zip(gradients, self.model.parameters()):
             if g is not None:
                 p.grad = torch.from_numpy(g).cuda()
         self.optimizer.step()
@@ -248,7 +247,7 @@ class PyTorchRunner(object):
                 print("getting state")
             state_dict = {}
             tmp_path = os.path.join(ckpt_path,
-                                    ".state{}".format(self.world_rank=0))
+                                    ".state{}".format(self.world_rank))
             torch.save({
                 "model": self.model.state_dict(),
                 "opt": self.optimizer.state_dict()
@@ -330,7 +329,7 @@ class PytorchCustom(ResourceTrainable):
         config["batch_per_device"] = max(
             int(config["target_batch_size"] / self.primary_resource),
             config["min_batch_size"])
-
+        self.batch_per_device = config["batch_per_device"]
         assert sum(self._placement_set) == self.primary_resource
         self.colocators = []
         self.remote_workers = []
@@ -379,7 +378,8 @@ class PytorchCustom(ResourceTrainable):
 
         ray.get(setup_futures)
         [worker.setup_model.remote() for worker in self.remote_workers]
-        raise NotImplementedError("Get number directory, sync all models")
+        
+        logger.error("TODO FOR REAL WORKLOAD: Get number directory, sync all models")
 
     def _setup(self, config):
         self.session_timer = {
@@ -392,33 +392,26 @@ class PytorchCustom(ResourceTrainable):
     def train(self):
         random_stop = self.resources.extra_gpu * 4
         with self.session_timer["train"]:
-            result = super(PytorchSGD, self).train()
-        result.update(ready_to_resize=self.ready_to_resize())
+            result = super(PytorchCustom, self).train()
+
         self.session_timer["train"].push_units_processed(
             result["data_this_epoch"])
-        result.update(training_time=self.session_timer["train"].last)
         result.update(
             train_throughput=self.session_timer["train"].mean_throughput)
-        self.resource_time += result["training_time"] * result["num_workers"]
-        result["resource_time"] = self.resource_time
         result["locations"] = self.locations
         print(f"{self._iteration} > {random_stop}")
         result["done"] = self._iteration > random_stop
         return result
 
     def _train(self):
-        for i in range(10):
-            all_grads = [w.compute_gradients.remote() for w in self.remote_workers]
+        NUM_ITER = 10
+        for i in range(NUM_ITER):
+            all_grads = [w.compute_grads.remote() for w in self.remote_workers]
             merged = self.remote_workers[0].merge.remote(all_grads)
             [w.apply_grad.remote(merged) for w in self.remote_workers]
-        worker_stats = ray.get(
-            [w.step.remote() for w in self.remote_workers])
-        # res = self._fetch_metrics_from_remote_workers()
-        df = pd.DataFrame(worker_stats)
-        results = df.mean().to_dict()
-        data_this_epoch = df["batch_processed"].sum()
+        data_this_epoch = self.batch_per_device * NUM_ITER * len(self.remote_workers)
         self._data_so_far += data_this_epoch
-
+        results = {}
         results.update(data_this_epoch=data_this_epoch)
         results.update(total_data_processed=self._data_so_far)
         if self.config["dataset"] == "CIFAR":
@@ -501,6 +494,7 @@ if __name__ == '__main__':
     runner.set_device()
     runner.setup_proc_group()
     runner.setup_model()
+    import ipdb; ipdb.set_trace()
     grads = runner.compute_grads()
     runner.merge([grads, grads])
     runner.apply_grad(grads)
