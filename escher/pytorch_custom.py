@@ -216,6 +216,7 @@ class PyTorchRunner(object):
         return grads
 
     def merge(self, list_of_grads):
+        list_of_grads = ray.get(list_of_grads)
         merged_grads = []
         for i, _ in enumerate(list_of_grads[0]):
             all_models_layer = np.mean(
@@ -408,7 +409,8 @@ class PytorchCustom(ResourceTrainable):
         for i in range(NUM_ITER):
             all_grads = [w.compute_grads.remote() for w in self.remote_workers]
             merged = self.remote_workers[0].merge.remote(all_grads)
-            [w.apply_grad.remote(merged) for w in self.remote_workers]
+            final = [w.apply_grad.remote(merged) for w in self.remote_workers]
+        ray.get(final)
         data_this_epoch = self.batch_per_device * NUM_ITER * len(self.remote_workers)
         self._data_so_far += data_this_epoch
         results = {}
