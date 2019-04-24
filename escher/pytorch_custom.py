@@ -227,7 +227,7 @@ class PyTorchRunner(object):
     def apply_grad(self, gradients):
         for g, p in zip(gradients, self.model.parameters()):
             if g is not None:
-                p.grad = torch.from_numpy(g).cuda()
+                p.grad = torch.from_numpy(g).cuda(non_blocking=True)
         self.optimizer.step()
 
     def stats(self):

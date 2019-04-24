@@ -1,4 +1,5 @@
 from escher.distributed_trainable import ResourceExecutor, Aggregator
+import sys
 import os
 from escher.pytorch_trainable import PytorchSGD, DEFAULT_CONFIG
 
@@ -10,15 +11,29 @@ from ray import tune
 from datetime import datetime
 from ray.tests.cluster_utils import Cluster
 from ray.tune.trial import Resources
+import argparse
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawDescriptionHelpFormatter, description="Shard.")
+
+parser.add_argument(
+    "--redis-address",
+    default=None,
+    type=str,
+    help="The Redis address of the cluster.")
+args = parser.parse_args(sys.argv[1:])
 
 def test_pytorch_custom():
-    ray.init(redis_address="localhost:6379")
+    
+    ray.init(redis_address=args.redis_address)
     from escher.pytorch_custom import PytorchCustom, DEFAULT_CONFIG
     config = DEFAULT_CONFIG.copy()
     config["trial_id"] = "hi"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "4,7"
-    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=2))
-    for i in range(20):
+    config["min_batch_size"] = 4
+    config["target_batch_size"] = 4
+    config["model_string"] = "resnet18"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"
+    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=6))
+    for i in range(10):
         print(custom.train())
     
 
