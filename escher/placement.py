@@ -41,7 +41,6 @@ class PlacementScheduler(FIFOScheduler):
             print(f"All placements {self.all_placements}")
             print(f"{sum(self.all_placements[location].values()) + rest_of_job} <= {total_job_size} (limit)")
             if sum(self.all_placements[location].values()) + rest_of_job <= self.limit:
-                import ipdb; ipdb.set_trace()
                 self._migrate_trial(trial, total_job_size, location)
                 
                 break

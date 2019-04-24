@@ -42,9 +42,9 @@ DEFAULT_CONFIG = {
     # Pins actors to cores
     "pin": False,
     "model_creator": None,
-    "target_batch_size": 1024,
-    "model_string": "resnet50",
-    "min_batch_size": 128,
+    "target_batch_size": 64,
+    "model_string": "resnet101",
+    "min_batch_size": 64,
     "dataset": "CIFAR",
     "placement": None,
     "use_nccl": False,
@@ -134,12 +134,12 @@ class PyTorchRunner(object):
             from filelock import FileLock
             with FileLock("./data.lock"):
                 trainset = torchvision.datasets.CIFAR10(
-                    root='./data',
+                    root='~/data',
                     train=True,
                     download=True,
                     transform=transform_train)
             valset = torchvision.datasets.CIFAR10(
-                root='./data',
+                root='~/data',
                 train=False,
                 download=False,
                 transform=transform_test)
@@ -404,7 +404,7 @@ class PytorchSGD(ResourceTrainable):
             self._setup_impl(config)
 
     def train(self):
-        random_stop = self.resources.extra_gpu * 5 + 5
+        random_stop = self.resources.extra_gpu * 4
         with self.session_timer["train"]:
             result = super(PytorchSGD, self).train()
         result.update(ready_to_resize=self.ready_to_resize())

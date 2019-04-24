@@ -68,8 +68,18 @@ def timestring():
 def test_tune():
     ray.init(redis_address="localhost:6379")
     d_config = DEFAULT_CONFIG.copy()
-    d_config.update({"target_batch_size": 128, "stop": 2, "steps_per_iteration": 5})
-    config = {"config": d_config} 
+    d_config.update({"target_batch_size": 32, "min_batch_size": 32, "stop": 2, "steps_per_iteration": 1})
+    config = {"config": d_config, "stop": {"time_total_s": 90}} 
+
+    tune.run(PytorchSGD,
+        name="no_sched_{}".format(timestring()),
+        local_dir="~/results/",
+        resources_per_trial=tune.grid_search([
+            dict(cpu=0, gpu=0, extra_gpu=i)
+            for i in [1,1,1,1, 6]]),
+        trial_executor=ResourceExecutor(),
+        **config)
+
     scheduler = PlacementScheduler(8)
     tune.run(PytorchSGD,
         name="my_exp_{}".format(timestring()),
@@ -77,16 +87,7 @@ def test_tune():
         scheduler=scheduler,
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1,1, 8]]),
-        trial_executor=ResourceExecutor(),
-        **config)
-
-    tune.run(PytorchSGD,
-        name="no_sched_{}".format(timestring()),
-        local_dir="~/results/",
-        resources_per_trial=tune.grid_search([
-            dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1,1, 8]]),
+            for i in [1,1,1,1, 6]]),
         trial_executor=ResourceExecutor(),
         **config)
 
