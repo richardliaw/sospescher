@@ -100,3 +100,47 @@ class TimerStat(object):
         self._start_time = None
         self._total_time = 0.0
         self.count = 0
+
+
+def drop_colocated(actors):
+    colocated, non_colocated = split_colocated(actors)
+    for a in colocated:
+        a.__ray_terminate__.remote()
+    return non_colocated
+
+
+def split_colocated(actors):
+    localhost = os.uname()[1]
+    hosts = ray.get([a.get_host.remote() for a in actors])
+    local = []
+    non_local = []
+    for host, a in zip(hosts, actors):
+        if host == localhost:
+            local.append(a)
+        else:
+            non_local.append(a)
+    return local, non_local
+
+
+def try_create_colocated(cls, args, count):
+    actors = [cls.remote(*args) for _ in range(count)]
+    local, rest = split_colocated(actors)
+    logger.info("Got {} colocated actors of {}".format(len(local), count))
+    for a in rest:
+        a.__ray_terminate__.remote()
+    return local
+
+
+def create_colocated(cls, args, count):
+    logger.info("Trying to create {} colocated actors".format(count))
+    ok = []
+    i = 1
+    while len(ok) < count and i < 10:
+        attempt = try_create_colocated(cls, args, count * i)
+        ok.extend(attempt)
+        i += 1
+    if len(ok) < count:
+        raise Exception("Unable to create enough colocated actors, abort.")
+    for a in ok[count:]:
+        a.__ray_terminate__.remote()
+    return ok[:count]
