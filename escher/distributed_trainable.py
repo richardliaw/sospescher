@@ -57,13 +57,17 @@ class ResourceTrainable(Trainable):
         if ray.worker._mode() == ray.worker.LOCAL_MODE:
             os.chdir(cwd)
 
+
 @ray.remote
 class TestActor():
     def __init__(self):
         pass
 
     def get_client(self):
-        return str(ray.worker.global_worker.plasma_client.store_socket_name)
+        client_table = ray.global_state.client_table()
+        socket_name = str(ray.worker.global_worker.plasma_client.store_socket_name)
+        return [k["ClientID"] for k in client_table if k["ObjectStoreSocketName"] == socket_name][0]
+
 
 class Aggregator(ResourceTrainable):
     def _setup(self, config):
@@ -94,3 +98,9 @@ class Aggregator(ResourceTrainable):
             "throughput": throughput,
             "done": self._iteration > random_stop
         }
+
+    def _save(self):
+        return {}
+
+    def _restore(self, ckpt):
+        pass

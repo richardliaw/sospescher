@@ -14,8 +14,11 @@ class PlacementScheduler(FIFOScheduler):
         self.limit = consolidation_limit
         self.all_placements = defaultdict(dict)
         self.all_live_trials = set()
+        self.executor = None
 
     def on_trial_result(self, trial_runner, trial, result):
+        if self.executor is None:
+            self.executor = trial_runner.trial_executor
         self.all_live_trials.add(trial.trial_id)
         locations = result["locations"]  # This is a map from location -> count
         in_sync = self._track_trial(trial_runner, trial.trial_id, locations)
@@ -25,20 +28,18 @@ class PlacementScheduler(FIFOScheduler):
             logger.info(f"{trial} is in sync!")
 
         total_job_size = sum(locations.values())
-        if total_job_size == 1:
+        if total_job_size == 1 or total_job_size > self.limit:
             return TrialScheduler.CONTINUE
         for location, size in locations.items():
             rest_of_job = total_job_size - size
             print(f"All placements {self.all_placements}")
-            print(f"{sum(self.all_placements[location].values()) + rest_of_job} <= {self.limit} (limit)")
+            print(f"{sum(self.all_placements[location].values()) + rest_of_job} <= {total_job_size} (limit)")
             if sum(self.all_placements[location].values()) + rest_of_job <= self.limit:
-
-                self._migrate_trial(trial, location)
+                self._migrate_trial(trial, total_job_size, location)
                 break
         return TrialScheduler.CONTINUE
 
     def on_trial_complete(self, trial_runner, trial, result):
-        import ipdb; ipdb.set_trace()
         self._track_trial(trial_runner, trial.trial_id, {t: 0 for t in result["locations"]})
         self.on_trial_remove(trial_runner, trial)
 
@@ -60,23 +61,15 @@ class PlacementScheduler(FIFOScheduler):
                 self.all_placements[path][trial_id] = count
         return in_sync
 
-    def _migrate_trial(self, trial, location):
-        raise NotImplementedError
-        # stop_trial
-        # delete resources in all_location
-        ray.experimental.create_resource(trial.trial_id, self.limit, location)
-        self._commit_resource_update(trial, self.limit)
-        self.executor.start_trial(trial)
-
-    def _commit_resource_update(self, trial, executor, updated_resources):
-        executor.save(trial, storage="memory")
-        executor.stop_trial(trial, stop_logger=False)
+    def _migrate_trial(self, trial, total_job_size, location):
+        self.executor.save(trial, storage="memory")
+        self.executor.stop_trial(trial, stop_logger=False)
         trial.status = Trial.PENDING
-        trial.resources = updated_resources
-        executor.start_trial(trial)
-        self.reallocation_timer[trial] = self.recharge_period
-        logger.info("Committed res {}".format(executor._committed_resources.summary_string()))
-        logger.info("Avail {}".format(executor._avail_resources.summary_string()))
 
-
-
+        for other_location in self.all_placements:
+            ray.experimental.delete_resource(trial.trial_id, other_location)
+        # delete resources in all_location
+        ray.experimental.create_resource(trial.trial_id, total_job_size, location)
+        trial.resources.extra_custom_resources[trial.trial_id] = total_job_size
+        print("New resources: {}".format(trial.resources.summary_string()))
+        self.executor.start_trial(trial)
