@@ -358,7 +358,7 @@ class PytorchCustom(ResourceTrainable):
         self.config = config or DEFAULT_CONFIG
 
         self._placement_set = [1 for i in range(self.primary_resource)]
-        if not resources and self.config["placement"]:
+        if not resources and self.config["placement"] and self.primary_resource > 1:
             self._placement_set = self.config["placement"]
 
         config["batch_per_device"] = max(
@@ -432,7 +432,7 @@ class PytorchCustom(ResourceTrainable):
             self._setup_impl(config)
 
     def train(self):
-        random_stop = self.resources.extra_gpu * 4
+        random_stop = max(self.resources.extra_gpu * 10, 20)
         with self.session_timer["train"]:
             result = super(PytorchCustom, self).train()
 

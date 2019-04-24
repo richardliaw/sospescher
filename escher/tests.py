@@ -1,7 +1,7 @@
 from escher.distributed_trainable import ResourceExecutor, Aggregator
 import sys
 import os
-from escher.pytorch_trainable import PytorchSGD, DEFAULT_CONFIG
+# from escher.pytorch_trainable import PytorchSGD, DEFAULT_CONFIG
 
 from escher.placement import PlacementScheduler
 
@@ -23,19 +23,20 @@ parser.add_argument(
 args = parser.parse_args(sys.argv[1:])
 
 def test_pytorch_custom():
-    
+
     ray.init(redis_address=args.redis_address)
     from escher.pytorch_custom import PytorchCustom, DEFAULT_CONFIG
     config = DEFAULT_CONFIG.copy()
     config["trial_id"] = "hi"
-    config["min_batch_size"] = 4
-    config["target_batch_size"] = 4
-    config["model_string"] = "resnet18"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5"
-    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=6))
+    config["min_batch_size"] = 64
+    config["target_batch_size"] = 64
+    config["model_string"] = "resnet101"
+    config["placement"] = [2,2]
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+    custom = PytorchCustom(config, resources=Resources(0,0, extra_gpu=4))
     for i in range(10):
         print(custom.train())
-    
+
 
 def test_basic():
     from collections import Counter
@@ -94,30 +95,35 @@ def timestring():
 
 def test_tune():
     ray.init(redis_address="localhost:6379")
-    d_config = DEFAULT_CONFIG.copy()
-    d_config.update({"target_batch_size": 8, "min_batch_size": 8, "stop": 2, "steps_per_iteration": 1})
-    config = {"config": d_config, "stop": {"time_total_s": 90}} 
+    from escher.pytorch_custom import PytorchCustom, DEFAULT_CONFIG
 
-    scheduler = PlacementScheduler(8)
-    tune.run(PytorchSGD,
+    d_config = DEFAULT_CONFIG.copy()
+    d_config["min_batch_size"] = 64
+    d_config["target_batch_size"] = 64
+    d_config["model_string"] = "resnet101"
+    d_config["placement"] = [2,2]
+    config = {"config": d_config, "stop": {"time_total_s": 240}}
+
+    scheduler = PlacementScheduler(4)
+    tune.run(PytorchCustom,
         name="my_exp_{}".format(timestring()),
         local_dir="~/results/",
         scheduler=scheduler,
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1,1, 6]]),
+            for i in [1,1,1, 4, 1, 4]]),
         trial_executor=ResourceExecutor(),
         **config)
 
-    tune.run(PytorchSGD,
+    tune.run(PytorchCustom,
         name="no_sched_{}".format(timestring()),
         local_dir="~/results/",
         resources_per_trial=tune.grid_search([
             dict(cpu=0, gpu=0, extra_gpu=i)
-            for i in [1,1,1,1, 6]]),
+            for i in [1,1,1, 4, 1, 4]]),
         trial_executor=ResourceExecutor(),
         **config)
 
 
 if __name__ == '__main__':
-    test_pytorch_custom()
+    test_tune()
